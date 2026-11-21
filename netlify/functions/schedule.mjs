@@ -23,9 +23,11 @@ const ROUND = { 'Round Robin, Round 1': 'Round robin 1', 'Round Robin, Round 2':
 
 const clean = (s) => (s || '').replace(/<[^>]*>/g, ' ').replace(/&amp;/g, '&').replace(/&#39;/g, "'").replace(/&quot;/g, '"').replace(/\s+/g, ' ').trim();
 const toMin = (t) => {
-  const m = /(\d{1,2}):(\d{2})\s*(am|pm)/i.exec(t || '');
+  // Accepts "~10:05 am", "10:05AM" or 24-hour "22:05".
+  const m = /(\d{1,2}):(\d{2})\s*([ap]\.?m\.?)?/i.exec(t || '');
   if (!m) return null;
-  let h = +m[1] % 12; if (m[3].toLowerCase() === 'pm') h += 12;
+  let h = +m[1];
+  if (m[3]) { h = h % 12; if (/^p/i.test(m[3])) h += 12; }
   return h * 60 + +m[2];
 };
 
@@ -65,7 +67,8 @@ export function parsePage(html) {
     const round = clean((/draw-position[^>]*>([\s\S]*?)<\/div>/.exec(c) || [])[1]);
     matches.push({ t, ring, ev: EVENT[mm[1]] || mm[1], m: mm[2], div: mm[2].split('.')[0], rd: ROUND[round] || round, sides });
   }
-  return { stamp, matches, teams, hasCards: chunks.length > 1 };
+  const timeSample = ((/<span class=['"]time['"][^>]*>[^<]*\d[^<]*<\/span>/.exec(html) || [])[0] || '').replace(/\s+/g, ' ');
+  return { stamp, matches, teams, hasCards: chunks.length > 1, timesFound: Object.keys(times).length, timeSample };
 }
 
 export function buildSchedule(pages) {
@@ -114,12 +117,23 @@ export function buildSchedule(pages) {
     const mine = tm.sides.find(isH), others = tm.sides.filter((s) => s !== mine);
     return { n: mine.name, t: tm.t, ring: tm.ring, ev: tm.ev, note: 'vs ' + others.map((s) => s.name).join(', ') };
   });
-  return { stamp: stamp.replace(/^\s*/, ''), athletes, teams: teamOut, live: true };
+  const debug = { pages: pages.length, matches: rows.length, matchesWithTime: rows.filter((x) => x.t !== null).length,
+    timesFound: pages.reduce((a, p) => a + (p.timesFound || 0), 0), timeSample: (pages.find((p) => p.timeSample) || {}).timeSample || '' };
+  return { stamp: stamp.replace(/^\s*/, ''), athletes, teams: teamOut, live: true, debug };
 }
 
 async function fetchPage(n) {
   const url = `${KIHAPP}${TOURNAMENT}?sort_by=start_time&show_completed=true&page=${n}`;
-  const r = await fetch(url, { headers: { 'User-Agent': 'Haechi family schedule page (low-volume, cached 60s)' } });
+  // Kihapp formats times for the visitor's time zone, which a browser sends in a
+  // time_zone cookie. Without it the times come back blank, so send Calgary's.
+  const r = await fetch(url, {
+    headers: {
+      'User-Agent': 'Mozilla/5.0 (compatible; Haechi family schedule page; low-volume, cached 60s)',
+      'Accept': 'text/html,application/xhtml+xml',
+      'Accept-Language': 'en-US,en;q=0.9',
+      'Cookie': 'time_zone=America%2FEdmonton',
+    },
+  });
   if (!r.ok) throw new Error(`Kihapp page ${n} returned ${r.status}`);
   return parsePage(await r.text());
 }
