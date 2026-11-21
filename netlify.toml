@@ -1,0 +1,8 @@
+# Netlify settings for the Haechi live schedule page.
+# No build step: the page is plain HTML and the function needs no packages.
+[build]
+  publish = "."
+  functions = "netlify/functions"
+
+[functions]
+  node_bundler = "esbuild"
